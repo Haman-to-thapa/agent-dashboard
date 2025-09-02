@@ -12,207 +12,159 @@ interface Doc {
 
 export default function AdminDashboard() {
   const [docs, setDocs] = useState<Doc[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [loadingDocs, setLoadingDocs] = useState<{ [id: string]: boolean }>({});
+  const [globalLoading, setGlobalLoading] = useState(false);
   const [questions, setQuestions] = useState<{ [id: string]: string }>({});
   const [answers, setAnswers] = useState<{ [id: string]: string }>({});
-
-  // New doc states
   const [newTitle, setNewTitle] = useState("");
   const [newContent, setNewContent] = useState("");
 
-  // Get token from localStorage
   const token = localStorage.getItem("token");
 
-  // Fetch docs on mount or when token changes
-  useEffect(() => {
-    if (!token) return; // wait until token exists
-    const fetchDocs = async () => {
-      setLoading(true);
-      try {
-        const res = await API.get<Doc[]>("/ai");
-        setDocs(res.data);
-      } catch (err) {
-        console.error("Failed to fetch docs", err);
-      } finally {
-        setLoading(false);
-      }
-    };
-    fetchDocs();
-  }, [token]);
+  const fetchDocs = async () => {
+    if (!token) return;
+    setGlobalLoading(true);
+    try {
+      const res = await API.get<Doc[]>("/ai", { headers: { Authorization: `Bearer ${token}` } });
+      setDocs(res.data);
+    } catch (err) { console.error(err); }
+    finally { setGlobalLoading(false); }
+  };
 
-  // Create a new doc
+  useEffect(() => { fetchDocs(); }, []);
+
   const handleCreateDoc = async () => {
     if (!newTitle || !newContent) return alert("Enter title and content");
+    if (!token) return;
+
+    setGlobalLoading(true);
     try {
-      setLoading(true);
-      const res = await API.post("/ai", { title: newTitle, content: newContent });
-      setDocs((prev) => [res.data, ...prev]);
-      setNewTitle("");
-      setNewContent("");
-      alert("Doc created successfully ✅");
-    } catch (err) {
-      console.error("Create doc failed", err);
-      alert("Failed to create doc ❌");
-    } finally {
-      setLoading(false);
-    }
+      const res = await API.post("/ai", { title: newTitle, content: newContent }, { headers: { Authorization: `Bearer ${token}` } });
+      setDocs([res.data, ...docs]);
+      setNewTitle(""); setNewContent("");
+    } catch (err) { console.error(err); }
+    finally { setGlobalLoading(false); }
   };
 
-  // Summarize a doc
-  const handleSummarize = async (id: string) => {
-    setLoading(true);
+  const handleUpdateDoc = async (id: string, type: "summary" | "tags") => {
+    if (!token) return;
+    setLoadingDocs(prev => ({ ...prev, [id]: true }));
     try {
-      const res = await API.patch(`/ai/${id}`, { summary: "Generated summary logic" });
-      setDocs((prev) =>
-        prev.map((doc) => (doc._id === id ? { ...doc, summary: res.data.summary } : doc))
-      );
-      alert("Summary updated");
-    } catch (err) {
-      console.error("Summarize failed", err);
-    } finally {
-      setLoading(false);
-    }
+      const body = type === "summary" ? { generateSummary: true } : { generateTags: true };
+      const res = await API.patch(`/ai/${id}`, body, { headers: { Authorization: `Bearer ${token}` } });
+      setDocs(prev => prev.map(doc => doc._id === id ? res.data.doc : doc));
+    } catch (err) { console.error(err); }
+    finally { setLoadingDocs(prev => ({ ...prev, [id]: false })); }
   };
 
-  // Generate tags
-  const handleGenerateTags = async (id: string) => {
-    setLoading(true);
-    try {
-      const res = await API.patch(`/ai/${id}`, { tags: ["example-tag"] });
-      setDocs((prev) =>
-        prev.map((doc) => (doc._id === id ? { ...doc, tags: res.data.tags } : doc))
-      );
-      alert("Tags updated");
-    } catch (err) {
-      console.error("Generate tags failed", err);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // Ask a question about a doc
-  const handleAskQuestion = async (id?: string) => {
-    if (!id) return alert("Doc ID missing!");
-    const question = questions[id];
-    if (!question) return alert("Enter a question first");
-
-    setLoading(true);
-    try {
-      const res = await API.post(`/ai/${id}/question`, { question });
-      setAnswers((prev) => ({ ...prev, [id]: res.data.answer }));
-      setQuestions((prev) => ({ ...prev, [id]: "" }));
-    } catch (err) {
-      console.error("Q&A failed", err);
-      alert("Q&A failed ❌");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // Delete a doc
   const handleDelete = async (id: string) => {
+    if (!token) return;
     if (!window.confirm("Delete this doc?")) return;
+    setLoadingDocs(prev => ({ ...prev, [id]: true }));
     try {
-      await API.delete(`/ai/${id}`);
-      setDocs((prev) => prev.filter((doc) => doc._id !== id));
-    } catch (err) {
-      console.error("Delete failed", err);
-    }
+      await API.delete(`/ai/${id}`, { headers: { Authorization: `Bearer ${token}` } });
+      setDocs(prev => prev.filter(doc => doc._id !== id));
+    } catch (err) { console.error(err); }
+    finally { setLoadingDocs(prev => ({ ...prev, [id]: false })); }
+  };
+
+  const handleAskQuestion = async (id: string) => {
+    if (!token) return;
+    const question = questions[id]; if (!question) return alert("Enter a question");
+    setLoadingDocs(prev => ({ ...prev, [id]: true }));
+    try {
+      const res = await API.post(`/ai/${id}/question`, { question }, { headers: { Authorization: `Bearer ${token}` } });
+      setAnswers(prev => ({ ...prev, [id]: res.data.answer }));
+      setQuestions(prev => ({ ...prev, [id]: "" }));
+    } catch (err) { console.error(err); }
+    finally { setLoadingDocs(prev => ({ ...prev, [id]: false })); }
   };
 
   return (
-    <div className="p-6">
-      <h1 className="text-2xl font-bold mb-6">Admin Dashboard</h1>
-
-      {/* Loading state */}
-      {loading && <p className="mb-4 text-white">Loading...</p>}
+    <div className="min-h-screen bg-gray-100 p-6">
+      <h1 className="text-3xl font-bold mb-6 text-teal-700">Admin Dashboard</h1>
 
       {/* Create Doc Form */}
-      <div className="mb-6 p-4 border rounded shadow bg-white/10 backdrop-blur">
-        <h2 className="text-xl font-semibold text-white mb-2">Create New Doc</h2>
+      <div className="mb-8 p-6 bg-white rounded-lg shadow-md">
+        <h2 className="text-xl font-semibold mb-4 text-gray-800">Create New Doc</h2>
         <input
-          type="text"
+          className="w-full mb-3 p-3 border rounded shadow-sm focus:outline-none focus:ring-2 focus:ring-teal-400"
           placeholder="Title"
           value={newTitle}
-          onChange={(e) => setNewTitle(e.target.value)}
-          className="w-full p-2 mb-2 rounded text-black"
+          onChange={e => setNewTitle(e.target.value)}
         />
         <textarea
+          className="w-full mb-3 p-3 border rounded shadow-sm focus:outline-none focus:ring-2 focus:ring-teal-400"
           placeholder="Content"
           value={newContent}
-          onChange={(e) => setNewContent(e.target.value)}
-          className="w-full p-2 mb-2 rounded text-black"
+          onChange={e => setNewContent(e.target.value)}
         />
         <button
           onClick={handleCreateDoc}
-          className="px-4 py-2 bg-teal-500 text-white rounded"
-          disabled={loading}
+          disabled={globalLoading}
+          className="px-5 py-2 bg-teal-500 text-white font-semibold rounded hover:bg-teal-600 transition"
         >
-          {loading ? "Creating..." : "Create Doc"}
+          {globalLoading ? "Creating..." : "Create Doc"}
         </button>
       </div>
 
       {/* Docs List */}
-      {docs.length === 0 && !loading && <p>No docs found.</p>}
+      <div className="grid md:grid-cols-2 gap-6">
+        {docs.map(doc => (
+          <div key={doc._id} className="bg-white rounded-lg shadow p-5 flex flex-col">
+            <h3 className="text-lg font-bold text-gray-800">{doc.title}</h3>
+            <p className="text-sm text-gray-500">Author: {doc.createdBy?.name || "Admin"} ({doc.createdBy?.email || "admin@example.com"})</p>
+            <p className="mt-2 text-gray-700"><strong>Summary:</strong> {doc.summary || "No summary yet"}</p>
+            <p className="mt-1 text-gray-700"><strong>Tags:</strong> {doc.tags?.join(", ") || "No tags yet"}</p>
 
-      {docs.map((doc) => (
-        <div key={doc._id} className="border p-4 mb-4 rounded shadow">
-          <h2 className="font-semibold">{doc.title}</h2>
-          <p className="text-sm text-gray-600">
-            Author: {doc.createdBy?.name || "Admin"} ({doc.createdBy?.email || "admin@example.com"})
-          </p>
-          <p className="mt-2">Summary: {doc.summary || "No summary yet"}</p>
-          <p className="mt-2">Tags: {doc.tags?.join(", ") || "No tags yet"}</p>
+            <div className="mt-4 flex flex-wrap gap-2">
+              <button
+                onClick={() => handleUpdateDoc(doc._id, "summary")}
+                disabled={loadingDocs[doc._id]}
+                className="px-3 py-1 bg-blue-500 text-white rounded hover:bg-blue-600 transition"
+              >
+                {loadingDocs[doc._id] ? "Loading..." : "Summarize"}
+              </button>
+              <button
+                onClick={() => handleUpdateDoc(doc._id, "tags")}
+                disabled={loadingDocs[doc._id]}
+                className="px-3 py-1 bg-green-500 text-white rounded hover:bg-green-600 transition"
+              >
+                {loadingDocs[doc._id] ? "Loading..." : "Generate Tags"}
+              </button>
+              <button
+                onClick={() => handleDelete(doc._id)}
+                className="px-3 py-1 bg-red-500 text-white rounded hover:bg-red-600 transition"
+              >
+                Delete
+              </button>
+            </div>
 
-          <div className="mt-4 flex gap-2">
-            <button
-              onClick={() => handleSummarize(doc._id)}
-              disabled={loading}
-              className="px-3 py-1 bg-blue-500 text-white rounded"
-            >
-              Summarize
-            </button>
-            <button
-              onClick={() => handleGenerateTags(doc._id)}
-              disabled={loading}
-              className="px-3 py-1 bg-green-500 text-white rounded"
-            >
-              Generate Tags
-            </button>
-            <button
-              onClick={() => handleDelete(doc._id)}
-              className="px-3 py-1 bg-red-500 text-white rounded"
-            >
-              Delete
-            </button>
+            {/* Ask Question */}
+            <div className="mt-4 flex gap-2 items-center">
+              <input
+                value={questions[doc._id] || ""}
+                onChange={e => setQuestions(prev => ({ ...prev, [doc._id]: e.target.value }))}
+                placeholder="Ask question..."
+                className="flex-1 p-2 border rounded focus:outline-none focus:ring-2 focus:ring-purple-400"
+              />
+              <button
+                onClick={() => handleAskQuestion(doc._id)}
+                disabled={loadingDocs[doc._id]}
+                className="px-3 py-1 bg-purple-500 text-white rounded hover:bg-purple-600 transition"
+              >
+                Ask
+              </button>
+            </div>
+
+            {answers[doc._id] && (
+              <p className="mt-2 text-gray-700"><strong>Answer:</strong> {answers[doc._id]}</p>
+            )}
           </div>
+        ))}
+      </div>
 
-          <div className="mt-4 flex gap-2">
-            <input
-              type="text"
-              value={questions[doc._id] || ""}
-              onChange={(e) =>
-                setQuestions((prev) => ({ ...prev, [doc._id]: e.target.value }))
-              }
-              placeholder="Ask about this doc..."
-              className="border p-2 rounded w-2/3"
-            />
-            <button
-              onClick={() => handleAskQuestion(doc._id)}
-              disabled={loading || !doc._id}
-              className="px-3 py-1 bg-purple-500 text-white rounded"
-            >
-              Ask
-            </button>
-          </div>
-
-          {answers[doc._id] && (
-            <p className="mt-2 text-gray-700">
-              <strong>Answer:</strong> {answers[doc._id]}
-            </p>
-          )}
-        </div>
-      ))}
+      {docs.length === 0 && !globalLoading && <p className="mt-6 text-gray-500">No docs found.</p>}
     </div>
   );
 }
