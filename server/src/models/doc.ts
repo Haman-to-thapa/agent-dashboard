@@ -1,5 +1,4 @@
-// models/doc.ts
-import { Schema, Types, model } from "mongoose";
+import { Schema, model, Types } from "mongoose";
 
 export interface IDoc {
   title: string;
@@ -7,8 +6,6 @@ export interface IDoc {
   summary?: string;
   tags?: string[];
   createdBy: Types.ObjectId;
-  createdAt?: Date;
-  updatedAt?: Date;
   versions?: { content: string; updatedAt: Date }[];
 }
 
@@ -29,5 +26,4 @@ const docSchema = new Schema<IDoc>(
   { timestamps: true }
 );
 
-const Doc = model<IDoc>("Doc", docSchema);
-export default Doc;
+export default model<IDoc>("Doc", docSchema);
